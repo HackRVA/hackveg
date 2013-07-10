@@ -25,7 +25,7 @@ LiquidCrystal lcd(4,5,6,7,8,9);
 Twitter twitter("14778397-pQbwMzp5tBtpqyBnZtpyNVrsUGYkZKK6s29eB8ojt");
 
 //a version number
-float ver = 0.2;
+float ver = 0.3;
 
 //do you prefer Farenheit or Celsius?
 const char* temp_pref = "F";
@@ -52,6 +52,10 @@ int z3power = 32;
 int z4power = 33;
 int z5power = 34;
 
+//**************************************************************
+// NETWOKRKING
+//**************************************************************
+
 //define the networking bits
 byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x2D, 0xB7};
 byte ip[] = {192,168,1,117};
@@ -59,8 +63,15 @@ byte subnet[] = {255,255,255,0};
 byte gateway[] = {192,168,1,1};
 byte dnsserver[] = {192,168,1,1};
 
-//create the I2C sensor instance
+//**************************************************************
+// I2C
+//**************************************************************
+
 Adafruit_BMP085 bmp;
+
+//**************************************************************
+// SETUP
+//**************************************************************
 
 void setup() {
 
@@ -74,6 +85,10 @@ void setup() {
     pinMode(pinNum, OUTPUT); 
   }
 }
+
+//**************************************************************
+// LOOP
+//**************************************************************
 
 int sensor_loop_count = 0;  
 
