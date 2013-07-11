@@ -19,7 +19,6 @@ hackveg.org
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-
 */
 
 #include <Ethernet.h>
@@ -34,23 +33,41 @@ hackveg.org
 #include <Adafruit_BMP085.h>
 #include <Twitter.h>
 #include <Time.h>
-
-//define the lcd pins
-LiquidCrystal lcd(4,5,6,7,8,9);
-
-//Twitter auth secret
-Twitter twitter("14778397-pQbwMzp5tBtpqyBnZtpyNVrsUGYkZKK6s29eB8ojt");
+#include <EthernetUdp.h>
 
 //a version number
 float ver = 0.3;
 
-//do you prefer Farenheit or Celsius?
-const char* temp_pref = "F";
+//*************************************************************
+// LCD SETUP
+//*************************************************************
 
 //delay between lcd screens
 int d = 3000; //delay value in ms
 
-//
+//define the lcd pins
+LiquidCrystal lcd(5,6,7,8,9,10);
+
+//*************************************************************
+// SOCIAL MEDIA SETUP
+//*************************************************************
+
+//Twitter auth secret
+Twitter twitter("14778397-pQbwMzp5tBtpqyBnZtpyNVrsUGYkZKK6s29eB8ojt");
+
+//*************************************************************
+// NTP SETUP
+//*************************************************************
+
+unsigned int localPort = 8888; 
+const int NTP_PACKET_SIZE= 48;
+
+EthernetUDP Udp;
+
+byte SNTP_server_IP[]    = { 192, 43, 244, 18}; // time.nist.gov
+//byte SNTP_server_IP[] = { 130,149,17,21};    // ntps1-0.cs.tu-berlin.de
+//byte SNTP_server_IP[] = { 192,53,103,108};   // ptbtime1.ptb.de
+
 //*************************************************************
 // PIN ASSIGNMENTS PIN ASSIGNMENTS PIN ASSIGNMENTS
 //*************************************************************
@@ -75,11 +92,12 @@ int z5power = 34;
 
 //define the networking bits
 byte mac[] = { 0x90, 0xA2, 0xDA, 0x0D, 0x2D, 0xB7};
+/*
 byte ip[] = {192,168,1,117};
 byte subnet[] = {255,255,255,0};
 byte gateway[] = {192,168,1,1};
 byte dnsserver[] = {192,168,1,1};
-
+*/
 //**************************************************************
 // I2C
 //**************************************************************
@@ -94,10 +112,12 @@ void setup() {
 
   lcd.begin(16,2);
   lcd.clear();
-  Ethernet.begin(mac, ip, dnsserver, gateway, subnet);
+  //Ethernet.begin(mac, ip, dnsserver, gateway, subnet);
+  Ethernet.begin(mac);
   bmp.begin();
   Serial.begin(57600);
-  
+  Udp.begin(localPort);
+
   for (int pinNum = 30; pinNum < 35; pinNum++) {
     pinMode(pinNum, OUTPUT); 
   }
@@ -107,115 +127,211 @@ void setup() {
 // LOOP
 //**************************************************************
 
-int sensor_loop_count = 0;  
-
 void loop() {
-  /*
-  let's decide if this is a "special" loop
-  where we want to send out tweets, etc.
-  */
-  
-  //by default we don't tweet
+
+  boolean debug = false;
   boolean send_tweet = false;
-  
-  if (sensor_loop_count == 10) { //divisible by 10
-   //we tweet!
-   send_tweet = true;
-   //and we reset the counter
-   sensor_loop_count = 0;
-  }
+  boolean send_water = false;
+  boolean lcd_on = true;
+  boolean temp_c = false: //if true, displays temp in celsius
 
-  /*
-  //debugging
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("sensorloopcount");
-  lcd.setCursor(0,2);
-  lcd.print(sensor_loop_count);
-  delay(1000);
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("send_tweet");
-  lcd.setCursor(0,2);
-  lcd.print(send_tweet);
+  /*-------- NTP code ----------*/
+  sendNTPpacket(timeServer); // send an NTP packet to a time server
+
+  // wait to see if a reply is available
   delay(1000);  
-  */
+  if ( Udp.parsePacket() ) {  
+    // We've received a packet, read the data from it
+    Udp.read(packetBuffer,NTP_PACKET_SIZE);  // read the packet into the buffer
   
-  //Welcome Screen
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("HackVeg ver. ");
-  lcd.print(ver, DEC);
-  lcd.setCursor(0,2);
-  lcd.print("hackveg.org");
-  delay(d);
- 
-  //print the IP address 
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("IP Address");
-  lcd.setCursor(0,2);
-  printIP(ip);
-  delay(d);
-
-  //print the Subnet Mask
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Subnet Mask");
-  lcd.setCursor(0,2);
-  printIP(subnet);
-  delay(d);  
+    //the timestamp starts at byte 40 of the received packet and is four bytes,
+    // or two words, long. First, esxtract the two words:
   
-  //print the GW address 
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Gateway");
-  lcd.setCursor(0,2);
-  printIP(gateway);
-  delay(d);
+    unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+    unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);  
+    // combine the four bytes (two words) into a long integer
+    // this is NTP time (seconds since Jan 1 1900):
+    unsigned long secsSince1900 = highWord << 16 | lowWord;
+    if (debug) {
+      Serial.print("Seconds since Jan 1 1900 = " );
+      Serial.println(secsSince1900);               
+    
+      // now convert NTP time into everyday time:
+      Serial.print("Unix time = ");
+    }
+  // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
+  const unsigned long seventyYears = 2208988800UL;     
+  // subtract seventy years:
+  unsigned long epoch = secsSince1900 - seventyYears;
   
-  //print the DNS Server 
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("DNS Server");
-  lcd.setCursor(0,2);
-  printIP(dnsserver);
-  delay(d);
+  int hour = (epoch  % 86400L) / 3600;
+  int minutes = (epoch  % 3600) / 60;
   
-  //print the Temp 
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Temperature");
-  lcd.setCursor(0,2);
-  getTemp(bmp.readTemperature(), send_tweet);
-  delay(d);
+  if (debug) {  
+    // print Unix time:
+    Serial.println(epoch);                               
   
   
-  //print the Pressure
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Pressure");
-  lcd.setCursor(0,2);
-  getPress(bmp.readPressure(), send_tweet);
-  delay(d);
+    // print the hour, minute and second:
+    Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
+    Serial.print(hour); // print the hour (86400 equals secs per day)
+    Serial.print(':');
+    if ( minutes < 10 ) {
+      // In the first 10 minutes of each hour, we'll want a leading '0'
+      Serial.print('0');
+    }
   
-  //print the elevation
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Altitude");
-  lcd.setCursor(0,2);
-  getAlt(bmp.readAltitude(), send_tweet);
-  delay(d);
-  
-  //poll each moisture sensor
-  lcd.clear();
-  lcd.setCursor(0,0);
-  for (int pinNum = z1sensor; pinNum < z5sensor; pinNum++) {
-    getMoisture(pinNum); 
+    Serial.print((epoch  % 3600) / 60); // print the minute (3600 equals secs per minute)
+    Serial.print(':'); 
+    if ( (epoch % 60) < 10 ) {
+      // In the first 10 seconds of each minute, we'll want a leading '0'
+      Serial.print('0');
+    }
+    
+    Serial.println(epoch %60); // print the second
+  }
+  // wait 30 seconds before asking for the time again
+  delay(30000); 
   }
   
-  sensor_loop_count++; 
-}
+  // send an NTP request to the time server at the given address 
+  unsigned long sendNTPpacket(IPAddress& address) {
+    // set all bytes in the buffer to 0
+    memset(packetBuffer, 0, NTP_PACKET_SIZE); 
+    // Initialize values needed to form NTP request
+    // (see URL above for details on the packets)
+    packetBuffer[0] = 0b11100011;   // LI, Version, Mode
+    packetBuffer[1] = 0;     // Stratum, or type of clock
+    packetBuffer[2] = 6;     // Polling Interval
+    packetBuffer[3] = 0xEC;  // Peer Clock Precision
+    // 8 bytes of zero for Root Delay & Root Dispersion
+    packetBuffer[12]  = 49; 
+    packetBuffer[13]  = 0x4E;
+    packetBuffer[14]  = 49;
+    packetBuffer[15]  = 52;
+    
+    // all NTP fields have been given values, now
+    // you can send a packet requesting a timestamp:         
+    Udp.beginPacket(address, 123); //NTP requests are to port 123
+    Udp.write(packetBuffer,NTP_PACKET_SIZE);
+    Udp.endPacket(); 
+  }
+  
+  //only do the time-based stuff if we're not debugging
+  if (debug == false) {
+    // Check the time
+    time_t t = now();
+  
+    //we will potentially water between 3am and 4am
+    if ((hour(t) > 2) && (hour(t) < 5)) {
+      send_water = true;  
+    }
+  
+    //if it's the top of the hour we'll send a tweet
+    if (minute(t) == 0) {
+      send_tweet = true; 
+    }
+  }
+  
+  if (lcd_on) {
+    //Welcome Screen
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("HackVeg ver. ");
+    lcd.print(ver, DEC);
+    lcd.setCursor(0,2);
+    lcd.print("hackveg.org");
+    delay(d);
+
+    if (debug == true) {  
+      //debugging
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("sensorloopcount");
+      lcd.setCursor(0,2);
+      lcd.print(sensor_loop_count);
+      delay(1000);
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("send_tweet");
+      lcd.setCursor(0,2);
+      lcd.print(send_tweet);
+      delay(1000);  
+    }
+   
+    //print the IP address 
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("IP Address");
+    lcd.setCursor(0,2);
+    printIP(ip);
+    delay(d);
+  
+    /*
+    //print the Subnet Mask
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Subnet Mask");
+    lcd.setCursor(0,2);
+    printIP(subnet);
+    delay(d);  
+    
+    //print the GW address 
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Gateway");
+    lcd.setCursor(0,2);
+    printIP(gateway);
+    delay(d);
+    
+    //print the DNS Server 
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("DNS Server");
+    lcd.setCursor(0,2);
+    printIP(dnsserver);
+    delay(d);
+    */
+  
+    //Probe Temp 
+    char poll_temp = getTemp(bmp.readTemperature(), send_tweet);
+    if (lcd_on) {
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Temperature");
+      lcd.setCursor(0,2);
+      lcd.print(poll_temp)
+      delay(d);
+    }
+      
+    //Probe Pressure
+    char poll_press = getPress(bmp.readPressure(), send_tweet);
+    if (lcd_on) {
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Pressure");
+      lcd.setCursor(0,2);
+      lcd.print(poll_press);
+      delay(d);
+    }
+    
+    //print the elevation
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Altitude");
+    lcd.setCursor(0,2);
+    getAlt(bmp.readAltitude(), send_tweet);
+    delay(d);
+    
+    //poll each moisture sensor
+    lcd.clear();
+    lcd.setCursor(0,0);
+    for (int pinNum = z1sensor; pinNum < z5sensor; pinNum++) {
+      getMoisture(pinNum); 
+    }
+  
+  } //end lcd_on check
+} //end loop()
 
 void getMoistureValue( int pin ) {
   //reports back one of the moisture zone readings
@@ -285,7 +401,7 @@ void getZoneNick( int z) {
  lcd.print(nick);
 }
 
-void getMoistureLevel( int m ) {
+void getMoistureLevel( int m, boolean tweet_check ) {
   //going off of the spec sheet, estimating the moisture of the soil
   // the sensor value description
   // 0  ~300     dry soil
@@ -304,8 +420,20 @@ void getMoistureLevel( int m ) {
     const char* soil = "Wet"; 
   }
   lcd.print(soil);
-
+  //test to see if we want to tweet or not[/color]
+  if (tweet_check == true) {
+  //and prep the tweet
+  char pres_c[4];
+    dtostrf(pres,1,1,pres_c);
+  
+    char twt[140];
+  
+    String twt_s = "@bohenderson -the #hackveg air pressure is " + String(pres_c) + " mb";
+    twt_s.toCharArray(twt,139);
+  
+    tweetMsg(twt);
 }
+
 void getPress( float pres, boolean tweet_check ) {
   //the sensor delivers the pressure in Pascals by default. 
   //We will convert to millibars
@@ -383,3 +511,6 @@ void tweetMsg( char msg[]) {
     lcd.print("connection failed");
   }
 }
+
+
+
